@@ -1,0 +1,427 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// Authentication & User Management
+// ============================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  password      String
+  role          UserRole  @default(USER)
+  twoFactorEnabled Boolean @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  profile       UserProfile?
+  uploads       Upload[]
+  disputeCandidates DisputeCandidate[]
+  letters       Letter[]
+  exports       Export[]
+  auditLogs     AuditLog[]
+  sessions      Session[]
+  verificationTokens VerificationToken[]
+
+  @@index([email])
+  @@map("users")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+model UserProfile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  fullName  String
+  address   String?
+  city      String?
+  state     String?
+  zipCode   String?
+  phone     String?
+  emailForLetters String?
+  dateOfBirth DateTime?
+  
+  identityConfirmed Boolean @default(false)
+  disclaimerAccepted Boolean @default(false)
+  disclaimerAcceptedAt DateTime?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("user_profiles")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token      String   @unique
+  type       TokenType
+  expires    DateTime
+  createdAt  DateTime @default(now())
+
+  @@map("verification_tokens")
+}
+
+enum TokenType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+  TWO_FACTOR
+}
+
+// ============================================
+// File Upload & Storage
+// ============================================
+
+model Upload {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  filename    String
+  originalName String
+  mimeType    String
+  sizeBytes   Int
+  storageKey  String   @unique
+  
+  status      UploadStatus @default(PENDING)
+  errorMessage String?
+  
+  createdAt   DateTime @default(now())
+  deletedAt   DateTime?
+  
+  parsedReports ParsedReport[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("uploads")
+}
+
+enum UploadStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// ============================================
+// Parsed Credit Reports
+// ============================================
+
+model ParsedReport {
+  id          String   @id @default(cuid())
+  uploadId    String
+  upload      Upload   @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  
+  bureau      Bureau
+  reportDate  DateTime?
+  
+  // Redacted raw text for reference
+  rawTextRedacted String?
+  
+  // Metadata as JSON
+  metadata    Json?
+  
+  createdAt   DateTime @default(now())
+  
+  tradelines  Tradeline[]
+  collections Collection[]
+  inquiries   Inquiry[]
+  publicRecords PublicRecord[]
+  personalInfo PersonalInfo?
+
+  @@index([uploadId])
+  @@index([bureau])
+  @@map("parsed_reports")
+}
+
+enum Bureau {
+  EQUIFAX
+  EXPERIAN
+  TRANSUNION
+}
+
+model PersonalInfo {
+  id        String   @id @default(cuid())
+  reportId  String   @unique
+  report    ParsedReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  
+  names     Json     // Array of name variants
+  addresses Json     // Array of addresses
+  employers Json?    // Array of employers
+  ssn       String?  // Last 4 only
+  dateOfBirth DateTime?
+  
+  createdAt DateTime @default(now())
+
+  @@map("personal_info")
+}
+
+// ============================================
+// Credit Report Items
+// ============================================
+
+model Tradeline {
+  id          String   @id @default(cuid())
+  reportId    String
+  report      ParsedReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  
+  creditor    String
+  accountNumber String  // Last 4 digits only
+  accountType String?
+  status      String?
+  balance     Decimal?
+  creditLimit Decimal?
+  highBalance Decimal?
+  
+  dateOpened  DateTime?
+  dateClosed  DateTime?
+  lastReported DateTime?
+  
+  paymentStatus String?
+  monthsReviewed Int?
+  latePayments Json?    // {30: count, 60: count, 90: count}
+  
+  remarks     String?
+  
+  // Evidence references (page numbers, line numbers)
+  evidenceRefs Json?
+  
+  createdAt   DateTime @default(now())
+
+  @@index([reportId])
+  @@map("tradelines")
+}
+
+model Collection {
+  id          String   @id @default(cuid())
+  reportId    String
+  report      ParsedReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  
+  agency      String
+  originalCreditor String?
+  accountNumber String  // Last 4 digits only
+  balance     Decimal?
+  
+  dateOfFirstDelinquency DateTime?  // DOFD
+  dateReported DateTime?
+  lastReported DateTime?
+  status      String?
+  
+  remarks     String?
+  evidenceRefs Json?
+  
+  createdAt   DateTime @default(now())
+
+  @@index([reportId])
+  @@map("collections")
+}
+
+model Inquiry {
+  id          String   @id @default(cuid())
+  reportId    String
+  report      ParsedReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  
+  subscriber  String
+  inquiryType InquiryType
+  inquiryDate DateTime?
+  
+  remarks     String?
+  evidenceRefs Json?
+  
+  createdAt   DateTime @default(now())
+
+  @@index([reportId])
+  @@map("inquiries")
+}
+
+enum InquiryType {
+  HARD
+  SOFT
+  UNKNOWN
+}
+
+model PublicRecord {
+  id          String   @id @default(cuid())
+  reportId    String
+  report      ParsedReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  
+  recordType  String   // Bankruptcy, Judgment, Lien, etc.
+  status      String?
+  amount      Decimal?
+  
+  dateFiled   DateTime?
+  dateResolved DateTime?
+  court       String?
+  caseNumber  String?
+  
+  remarks     String?
+  evidenceRefs Json?
+  
+  createdAt   DateTime @default(now())
+
+  @@index([reportId])
+  @@map("public_records")
+}
+
+// ============================================
+// Analysis & Dispute Candidates
+// ============================================
+
+model DisputeCandidate {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  bureau      Bureau
+  category    DisputeCategory
+  
+  // Reference to the actual item (tradeline, collection, etc.)
+  relatedItemType String  // "tradeline", "collection", "inquiry", etc.
+  relatedItemId   String
+  
+  rationale   String   // Plain English explanation
+  confidence  Int      // 0-100
+  
+  // Evidence references
+  evidenceRefs Json?
+  
+  // User selection
+  includedInLetter Boolean @default(true)
+  
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([bureau])
+  @@index([category])
+  @@map("dispute_candidates")
+}
+
+enum DisputeCategory {
+  PERSONAL_INFO_MISMATCH
+  DUPLICATE
+  MISSING_DATES
+  DATE_INCONSISTENCY
+  RE_AGING
+  OBSOLETE_COLLECTION
+  UNRECOGNIZED_INQUIRY
+  LATE_PAYMENT_INCONSISTENCY
+  BALANCE_LIMIT_ANOMALY
+  NOT_MINE
+  OTHER
+}
+
+// ============================================
+// Dispute Letters
+// ============================================
+
+model Letter {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  letterType  LetterType
+  bureau      Bureau?
+  creditor    String?
+  
+  contentHtml String
+  version     Int      @default(1)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  exports     Export[]
+
+  @@index([userId])
+  @@index([letterType])
+  @@map("letters")
+}
+
+enum LetterType {
+  BUREAU_DISPUTE
+  CREDITOR_DISPUTE
+  DEBT_VALIDATION
+}
+
+// ============================================
+// Document Exports
+// ============================================
+
+model Export {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  letterId    String?
+  letter      Letter?  @relation(fields: [letterId], references: [id], onDelete: SetNull)
+  
+  exportType  ExportType
+  storageKey  String   @unique
+  filename    String
+  sizeBytes   Int
+  
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime?
+
+  @@index([userId])
+  @@map("exports")
+}
+
+enum ExportType {
+  PDF
+  DOCX
+  ZIP
+  ANALYSIS_SUMMARY
+}
+
+// ============================================
+// Audit & Compliance
+// ============================================
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  action      String
+  resourceType String?
+  resourceId  String?
+  
+  ipAddress   String?
+  userAgent   String?
+  
+  metadata    Json?
+  
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
