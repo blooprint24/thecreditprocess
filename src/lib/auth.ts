@@ -2,20 +2,15 @@ import NextAuth from 'next-auth'
 import CredentialsProvider from 'next-auth/providers/credentials'
 import { PrismaAdapter } from '@auth/prisma-adapter'
 import { prisma } from '@/lib/db'
-import { verifyPassword } from '@/lib/crypto'
-import type { User } from '@prisma/client'
+import { verifyPassword } from '@/lib/password'
+import { authConfig } from '@/lib/auth.config'
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
+    ...authConfig,
     adapter: PrismaAdapter(prisma),
     session: {
         strategy: 'jwt',
         maxAge: 30 * 24 * 60 * 60, // 30 days
-    },
-    pages: {
-        signIn: '/auth/login',
-        signOut: '/auth/logout',
-        error: '/auth/error',
-        verifyRequest: '/auth/verify-email',
     },
     providers: [
         CredentialsProvider({
@@ -72,7 +67,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
                         throw new Error('Invalid or expired 2FA code')
                     }
 
-                    // Delete used token
+                    // Delete used token using a separate transaction or just async
+                    // Note: In strict Edge, this might fail, but authorize is Node compatible in v5
                     await prisma.verificationToken.delete({
                         where: { id: twoFactorToken.id },
                     })
@@ -97,33 +93,25 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             },
         }),
     ],
-    callbacks: {
-        async jwt({ token, user }) {
-            if (user) {
-                token.id = user.id
-                token.role = (user as any).role
-            }
-            return token
-        },
-        async session({ session, token }) {
-            if (session.user) {
-                session.user.id = token.id as string
-                session.user.role = token.role as string
-            }
-            return session
-        },
-    },
     events: {
         async signOut({ token }) {
             if (token?.id) {
-                await prisma.auditLog.create({
-                    data: {
-                        userId: token.id as string,
-                        action: 'LOGOUT',
-                        resourceType: 'User',
-                        resourceId: token.id as string,
-                    },
-                })
+                // This runs in Node runtime for API routes
+                try {
+                    // We need to re-import prisma here locally if passing it from context issues arise
+                    // but usually it's fine in events if they run in node
+                    const { prisma } = await import('@/lib/db')
+                    await prisma.auditLog.create({
+                        data: {
+                            userId: token.id as string,
+                            action: 'LOGOUT',
+                            resourceType: 'User',
+                            resourceId: token.id as string,
+                        },
+                    })
+                } catch (error) {
+                    console.error('Logout audit log error:', error)
+                }
             }
         },
     },

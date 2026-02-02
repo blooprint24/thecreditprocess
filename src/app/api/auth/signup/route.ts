@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { hashPassword, generateToken } from '@/lib/crypto'
+import { hashPassword, generateToken } from '@/lib/password'
 import { sendVerificationEmail } from '@/lib/email'
 import { signUpSchema } from '@/lib/validations'
 

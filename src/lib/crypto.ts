@@ -1,30 +1,9 @@
-import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
 
-const SALT_ROUNDS = 12
-
-export async function hashPassword(password: string): Promise<string> {
-    return bcrypt.hash(password, SALT_ROUNDS)
-}
-
-export async function verifyPassword(password: string, hashedPassword: string): Promise<boolean> {
-    return bcrypt.compare(password, hashedPassword)
-}
-
-export function generateToken(length: number = 32): string {
-    return crypto.randomBytes(length).toString('hex')
-}
-
-export function generateOTP(length: number = 6): string {
-    const digits = '0123456789'
-    let otp = ''
-    for (let i = 0; i < length; i++) {
-        otp += digits[Math.floor(Math.random() * digits.length)]
-    }
-    return otp
-}
-
 // Encryption for sensitive data at rest
+// NOTE: This file uses Node.js 'crypto' module and is NOT Edge Runtime compatible.
+// Only use this in Server Components or API Routes (Node.js runtime).
+
 const ALGORITHM = 'aes-256-gcm'
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'dev-encryption-key-32-chars-min'
 
